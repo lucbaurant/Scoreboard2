@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14161a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Marquoir</title>
 <style>
 :root{color-scheme:dark;--bg:#14161a;--panel:#1d2026;--line:#2b2f37;--ink:#f2f0ea;--muted:#8b909a;--bw:#ff7814;--vis:#2878ff;--tm:#ffdc00;--ok:#3ecf74;--bad:#ff5a4f;
@@ -18,7 +22,7 @@ header{display:flex;align-items:center;gap:10px;padding-top:8px}
 #dot{width:12px;height:12px;border-radius:50%;background:var(--bad);flex:none}
 #dot.on{background:var(--ok)}
 #status{flex:1;color:var(--muted)}
-#conn{min-height:40px;padding:8px 14px}
+#conn,#inst{min-height:40px;padding:8px 14px}
 main{flex:1;display:flex;flex-direction:column;gap:10px;min-height:0;transition:opacity .2s}
 body.off main{opacity:.35;pointer-events:none}
 .team{background:var(--panel);border-left:8px solid var(--c);border-radius:12px;padding:10px 12px;display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center}
@@ -50,7 +54,7 @@ body.off main{opacity:.35;pointer-events:none}
 </style>
 </head>
 <body class="off">
-<header><span id="dot"></span><span id="status">Non connecté</span><button id="conn">Connecter</button></header>
+<header><span id="dot"></span><span id="status">Non connecté</span><button id="inst" hidden>Installer</button><button id="conn">Connecter</button></header>
 <main>
 <section class="team a" id="tA">
  <div class="name">BW <span class="srv">au service</span></div><div class="score" id="sA">0</div>
@@ -123,13 +127,17 @@ async function link(){
  status('Connecté à '+dev.name,true);
  try{lock=await navigator.wakeLock.request('screen')}catch(e){}
 }
+let retrying=false;
 async function onDrop(){
  cmdC=null;
- for(let i=1;i<=3;i++){
-  status('Connexion perdue — nouvelle tentative '+i+'/3');
-  await new Promise(r=>setTimeout(r,1500));
-  try{await link();return}catch(e){}
+ if(retrying)return;
+ retrying=true;
+ for(let i=1;i<=10&&!(dev.gatt.connected&&cmdC);i++){
+  status('Connexion perdue — tentative '+i+'/10');
+  await new Promise(r=>setTimeout(r,2000));
+  try{await link();retrying=false;return}catch(e){}
  }
+ retrying=false;
  status('Connexion perdue. Touche Connecter pour reprendre.');
 }
 async function connect(){
@@ -146,9 +154,19 @@ async function connect(){
 }
 
 $('conn').onclick=connect;
+// Installation : Chrome propose son bandeau ; ce bouton le déclenche à la demande
+let installEvt=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;$('inst').hidden=false});
+$('inst').onclick=async()=>{if(!installEvt)return;installEvt.prompt();await installEvt.userChoice;installEvt=null;$('inst').hidden=true};
+window.addEventListener('appinstalled',()=>{$('inst').hidden=true});
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 document.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>send(+b.dataset.a));
 $('rst').onclick=()=>{if(confirm('Remettre le match à zéro ? Scores, sets et temps morts seront effacés.'))send(13)};
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&dev&&dev.gatt.connected)navigator.wakeLock?.request('screen').then(l=>lock=l).catch(()=>{})});
+document.addEventListener('visibilitychange',()=>{
+ if(document.hidden||!dev)return;
+ if(dev.gatt.connected)navigator.wakeLock?.request('screen').then(l=>lock=l).catch(()=>{});
+ else onDrop();
+});
 </script>
 </body>
 </html>
